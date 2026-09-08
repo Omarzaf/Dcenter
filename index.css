@@ -1,0 +1,317 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Chakra Petch", "Chakra Petch Fallback", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-void: #06080a;
+  --color-deck: #0b0e11;
+  --color-panel: #101419;
+  --color-panel2: #151a20;
+  --color-line: #293139;
+  --color-cool: #78c8c0;
+  --color-rack: #69a6d7;
+  --color-power: #d6a243;
+  --color-fiber: #c77a9c;
+  --color-alarm: #d9544f;
+  --color-ok: #80b784;
+  --color-ash: #83909b;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-void);
+  color: #d8dee3;
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+canvas {
+  display: block;
+  touch-action: none;
+}
+
+input {
+  font-family: var(--font-mono);
+}
+
+/* ---------- utility / theme bits ---------- */
+
+.scanlines::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.022) 0px,
+    rgba(255, 255, 255, 0.022) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: overlay;
+}
+
+.grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.12;
+  background-image:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px);
+  background-size: 5px 5px, 7px 7px;
+  mix-blend-mode: screen;
+}
+
+.rail-section {
+  border-top: 1px solid var(--color-line);
+  background: rgba(10, 13, 16, 0.66);
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--color-ash);
+  font-family: var(--font-display);
+  font-size: 0.66rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.section-label::before {
+  content: "";
+  width: 14px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.65;
+}
+
+.tool-button {
+  display: inline-flex;
+  min-height: 2rem;
+  width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--color-line);
+  color: var(--color-ash);
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.tool-button:hover {
+  color: #d8dee3;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.action-primary {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2.5rem;
+  min-height: 3.5rem;
+  border: 1px solid var(--color-power);
+  background: var(--color-power);
+  padding: 0.8rem 1rem;
+  color: #0a0b0c;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition: background-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.action-primary::after {
+  content: "";
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 18px;
+  height: 18px;
+  border-right: 1px solid var(--color-power);
+  border-bottom: 1px solid var(--color-power);
+}
+
+.action-primary:hover {
+  background: #e2b458;
+}
+
+.action-primary:active {
+  transform: translateY(1px);
+}
+
+.action-secondary {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+  padding-inline: 1rem;
+  color: var(--color-ash);
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition: color 140ms ease, border-color 140ms ease;
+}
+
+.action-secondary:hover {
+  color: #d8dee3;
+  border-color: var(--color-ash);
+}
+
+.screen-veil {
+  background:
+    linear-gradient(90deg, rgba(5, 7, 9, 0.97) 0%, rgba(5, 7, 9, 0.9) 42%, rgba(5, 7, 9, 0.48) 100%),
+    rgba(5, 7, 9, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.kbd {
+  display: inline-flex;
+  min-width: 1.4rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid #56616b;
+  background: rgba(255, 255, 255, 0.045);
+  padding-inline: 0.3rem;
+  color: #c9d0d5;
+  font-size: 0.62rem;
+}
+
+.measure-line {
+  background-image: repeating-linear-gradient(
+    to right,
+    rgba(131, 144, 155, 0.42) 0,
+    rgba(131, 144, 155, 0.42) 1px,
+    transparent 1px,
+    transparent 24px
+  );
+}
+
+.frame-corners {
+  background:
+    linear-gradient(var(--color-power), var(--color-power)) left top / 18px 1px no-repeat,
+    linear-gradient(var(--color-power), var(--color-power)) left top / 1px 18px no-repeat,
+    linear-gradient(var(--color-power), var(--color-power)) right bottom / 18px 1px no-repeat,
+    linear-gradient(var(--color-power), var(--color-power)) right bottom / 1px 18px no-repeat;
+}
+
+/* ---------- animations ---------- */
+
+@keyframes flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  94% {
+    opacity: 0.82;
+  }
+  96% {
+    opacity: 1;
+  }
+  97% {
+    opacity: 0.88;
+  }
+}
+.anim-flicker {
+  animation: flicker 6s infinite steps(1, end);
+}
+
+@keyframes slidein {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.anim-slidein {
+  animation: slidein 0.28s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes popin {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.anim-pop {
+  animation: popin 0.34s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes pulsebar {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.anim-alarm {
+  animation: pulsebar 0.78s ease-in-out infinite;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e2c40;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Preserve a useful game board on short phone landscape viewports. */
+@media (max-width: 1023px) and (max-height: 600px) and (orientation: landscape) {
+  .mobile-deck .mobile-summary,
+  .mobile-deck .mobile-meters,
+  .mobile-deck .deploy-bar > div:first-child {
+    display: none;
+  }
+
+  .mobile-deck .deploy-bar button {
+    min-height: 44px;
+    flex-direction: row;
+    gap: 0.4rem;
+  }
+}
