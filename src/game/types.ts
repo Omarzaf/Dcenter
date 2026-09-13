@@ -1,3 +1,7 @@
+import type { ConceptId } from "./curriculum";
+
+export type { ConceptId };
+
 export type UnitType = "rack" | "cool" | "power" | "fiber";
 
 export interface UnitDef {
@@ -29,7 +33,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
     id: "rack",
     name: "SERVER RACK",
     code: "CPU",
-    color: "#4aa8ff",
+    color: "#69a6d7",
     dim: "#123a63",
     draw: 3,
     heat: 1.15,
@@ -39,18 +43,18 @@ export const UNITS: Record<UnitType, UnitDef> = {
     id: "cool",
     name: "COOLANT ARRAY",
     code: "HVAC",
-    color: "#2ee6d6",
+    color: "#78c8c0",
     dim: "#0d4c4a",
-    draw: 4,
+    draw: 3,
     heat: 0,
-    vent: 3.4,
-    blurb: "Vents heat in a 3×3 block. Keeps the core alive.",
+    vent: 5,
+    blurb: "Vents a 3×3 block. Surrounded by racks it runs at full capacity; over empty floor most of its output is wasted.",
   },
   power: {
     id: "power",
     name: "POWER BUS",
     code: "PDU",
-    color: "#ffb020",
+    color: "#d6a243",
     dim: "#5c3d05",
     draw: 0.5,
     heat: 0.4,
@@ -61,7 +65,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
     id: "fiber",
     name: "FIBER SWITCH",
     code: "NET",
-    color: "#ff5fa2",
+    color: "#c77a9c",
     dim: "#5c1737",
     draw: 1,
     heat: 0.2,
@@ -157,15 +161,39 @@ export interface Snapshot {
   newAchievement: AchievementId | null;
   achievements: AchievementId[];
   scoredPods: number;
+  objectives: Objective[];
+  /** Total facility draw divided by IT draw. Infinity when no IT load exists. */
+  pue: number;
+  avgPue: number;
+  itLoad: number;
+  overhead: number;
+  peakTemp: number;
+  throttled: number;
+  redundantPower: boolean;
+  pendingConcept: ConceptId | null;
+  seenConcepts: ConceptId[];
+  learnMode: boolean;
 }
+
+export interface Objective {
+  label: string;
+  done: boolean;
+}
+
+/** Which units count as IT load for the PUE ratio. */
+export const IT_UNITS: UnitType[] = ["rack", "fiber"];
 
 export interface PublicSettings {
   muted: boolean;
   shake: number; // 0..1
   palette: "classic" | "deuteranopia" | "tritanopia";
+  /** When true, first encounters with a concept pause and present a card. */
+  learnMode: boolean;
 }
 
 export type GameState = "idle" | "running" | "paused" | "over";
+
+
 
 export const ACHIEVEMENTS: Record<AchievementId, Achievement> = {
   first_pod: { id: "first_pod", label: "FIRST POD", desc: "Linked your first POD." },
@@ -178,8 +206,8 @@ export const ACHIEVEMENTS: Record<AchievementId, Achievement> = {
 };
 
 export const SHIFTS = [
-  { name: "DAY SHIFT", tint: "#ffe6a8", accent: "#4aa8ff" },
-  { name: "EVENING", tint: "#ff7a3d", accent: "#ff5fa2" },
-  { name: "NIGHT", tint: "#2ee6d6", accent: "#7d93ad" },
-  { name: "GRAVEYARD", tint: "#ff3b47", accent: "#ffb020" },
+  { name: "DAY SHIFT", tint: "#d8cdb0", accent: "#69a6d7" },
+  { name: "EVENING", tint: "#cf784d", accent: "#c77a9c" },
+  { name: "NIGHT", tint: "#78c8c0", accent: "#7d93ad" },
+  { name: "GRAVEYARD", tint: "#d9544f", accent: "#d6a243" },
 ];

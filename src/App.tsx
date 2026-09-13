@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Cpu, Pause, Volume2, VolumeX, Radio, Settings as Gear } from "lucide-react";
+import { BookOpen, Cpu, Pause, Volume2, VolumeX, Radio, Settings as Gear } from "lucide-react";
 import { Engine } from "./game/engine";
 import { draw } from "./game/render";
 import { sfx } from "./game/audio";
@@ -8,17 +8,21 @@ import {
   saveScore,
   loadSettings,
   saveSettings,
+  loadCodex,
+  saveCodex,
   formatScore,
   formatTime,
   type ScoreEntry,
 } from "./game/storage";
-import type { GameState, PublicSettings, Snapshot } from "./game/types";
+import { UNITS, type ConceptId, type GameState, type PublicSettings, type Snapshot } from "./game/types";
+import { Codex } from "./components/Codex";
+import { ConceptCard } from "./components/ConceptCard";
 import {
   DeployBar,
   Legend,
   LogFeed,
   Meter,
-  ScoreBadge,
+  ObjectiveBand,
   ShiftBadge,
   Telemetry,
 } from "./components/Hud";
@@ -56,10 +60,21 @@ const EMPTY: Snapshot = {
   shiftName: "DAY SHIFT",
   scrambled: 0,
   humid: 0,
-  settings: { muted: false, shake: 1, palette: "classic" },
+  settings: { muted: false, shake: 1, palette: "classic", learnMode: true },
   newAchievement: null,
   achievements: [],
   scoredPods: 0,
+  objectives: [{ label: "Link a POD", done: false }],
+  pue: Infinity,
+  avgPue: Infinity,
+  itLoad: 0,
+  overhead: 0,
+  peakTemp: 16,
+  throttled: 0,
+  redundantPower: false,
+  pendingConcept: null,
+  seenConcepts: [],
+  learnMode: true,
 };
 
 export default function App() {
@@ -74,6 +89,7 @@ export default function App() {
   const [saved, setSaved] = useState(false);
   const [muted, setMuted] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [codexOpen, setCodexOpen] = useState(false);
   const [isTouch, setIsTouch] = useState(false);
 
   /* ---------------- engine boot ---------------- */
@@ -84,6 +100,7 @@ export default function App() {
 
     const eng = new Engine(canvas);
     engineRef.current = eng;
+    setState(eng.state);
     eng.onSnapshot = (s) => {
       snapRef.current = s;
       setSnap(s);
@@ -92,6 +109,7 @@ export default function App() {
       setState(s);
       if (s === "over") setSaved(false);
     };
+    eng.onConceptUnlock = saveCodex;
 
     const ro = new ResizeObserver(() => {
       const r = wrap.getBoundingClientRect();
@@ -108,6 +126,9 @@ export default function App() {
     eng.setSettings(persisted);
     sfx.setMuted(!!persisted.muted);
     setMuted(!!persisted.muted);
+    // Codex progress survives across sessions, so cards never re-interrupt.
+    for (const id of loadCodex()) eng.seenConcepts.add(id as ConceptId);
+    eng.emit();
     setIsTouch(
       typeof window !== "undefined" &&
         (window.matchMedia?.("(pointer: coarse)").matches || "ontouchstart" in window),
@@ -127,12 +148,27 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    engineRef.current?.setOverlayOpen(settingsOpen || codexOpen);
+  }, [settingsOpen, codexOpen]);
+
   const start = useCallback(() => {
     sfx.unlock();
     engineRef.current?.start();
+    canvasRef.current?.focus();
   }, []);
-  const pause = useCallback(() => engineRef.current?.togglePause(), []);
+  const pause = useCallback(() => {
+    engineRef.current?.togglePause();
+    if (engineRef.current?.state === "running") canvasRef.current?.focus();
+  }, []);
   const select = useCallback((i: number) => engineRef.current?.select(i), []);
+
+  const dismissConcept = useCallback(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    eng.dismissConcept();
+    saveCodex(Array.from(eng.seenConcepts));
+  }, []);
 
   const applySettings = useCallback((next: PublicSettings) => {
     engineRef.current?.setSettings(next);
@@ -164,7 +200,15 @@ export default function App() {
 
   const running = state === "running";
   const heatPct = Math.min(1, snap.coreTemp / 100);
-  const heatColor = heatPct > 0.82 ? "#ff3b47" : heatPct > 0.6 ? "#ffb020" : "#2ee6d6";
+  // Must stay in sync with the restrained palette used by Telemetry.
+  const heatColor = heatPct > 0.82 ? "#d9544f" : heatPct > 0.6 ? "#d6a243" : "#78c8c0";
+  const bestScore = scores[0]?.score ?? 0;
+  const critical = snap.danger && running;
+  const eng = engineRef.current;
+  const cursorCell = eng?.grid[eng.cursor.y * 8 + eng.cursor.x];
+  const cursorDescription = eng
+    ? `Row ${eng.cursor.y + 1}, column ${eng.cursor.x + 1}: ${cursorCell?.unit ? UNITS[cursorCell.unit].name : "empty"}${cursorCell && cursorCell.offline > 0 ? ", offline" : ""}.`
+    : "";
 
   return (
     <div className="grain relative flex h-[100dvh] w-full flex-col overflow-hidden bg-void select-none">
@@ -178,7 +222,7 @@ export default function App() {
               <div className="truncate font-display text-[12px] font-semibold uppercase tracking-[0.2em] text-[#d8dee3] sm:text-[13px]">
                 Datacenter <span className="text-power">/ Core Build</span>
               </div>
-              <div className="mt-0.5 hidden text-[8px] uppercase tracking-[0.22em] text-ash/55 sm:block">
+              <div className="mt-0.5 hidden text-[9px] uppercase tracking-[0.22em] text-ash/55 sm:block">
                 Sector 07 / Cold aisle containment
               </div>
             </div>
@@ -191,23 +235,47 @@ export default function App() {
 
         <div className="ml-auto flex items-stretch">
           <div className="hidden min-w-[118px] items-center border-l border-line px-4 text-right lg:flex lg:flex-col lg:justify-center">
-            <div className="text-[7px] uppercase tracking-[0.2em] text-ash/50">Record</div>
+            <div className="text-[9px] uppercase tracking-[0.2em] text-ash/50">Record</div>
             <div className="font-display text-[12px] tabular-nums text-ash">
               {scores.length ? formatScore(scores[0].score) : "000"}
             </div>
           </div>
           <div className="flex min-w-[94px] flex-col justify-center border-l border-line px-3 text-right sm:min-w-[120px] sm:px-4">
-            <div className="text-[7px] uppercase tracking-[0.2em] text-ash/50">Live score</div>
+            <div className="text-[9px] uppercase tracking-[0.2em] text-ash/50">Live score</div>
             <div className="font-display text-lg leading-none tabular-nums text-[#ded8ca]">
               {formatScore(snap.score)}
             </div>
           </div>
-          <button onClick={toggleMute} aria-label="Toggle sound" className="tool-button h-full">
+          <button
+            onClick={() => { setSettingsOpen(false); setCodexOpen((open) => !open); }}
+            disabled={!!snap.pendingConcept}
+            aria-label="Operations codex"
+            aria-expanded={codexOpen}
+            aria-haspopup="dialog"
+            className={cn(
+              "tool-button h-full relative",
+              codexOpen && "bg-white/[0.04] text-cool",
+            )}
+          >
+            <BookOpen size={14} />
+            {snap.seenConcepts.length > 0 && (
+              <span className="absolute right-1 top-1 h-1 w-1 bg-cool" aria-hidden="true" />
+            )}
+          </button>
+          <button
+            onClick={toggleMute}
+            aria-label={muted ? "Enable sound" : "Mute sound"}
+            aria-pressed={muted}
+            className="tool-button h-full"
+          >
             {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
           </button>
           <button
-            onClick={() => setSettingsOpen((open) => !open)}
+            onClick={() => { setCodexOpen(false); setSettingsOpen((open) => !open); }}
+            disabled={!!snap.pendingConcept}
             aria-label="Settings"
+            aria-expanded={settingsOpen}
+            aria-haspopup="dialog"
             className={cn("tool-button h-full", settingsOpen && "bg-white/[0.04] text-cool")}
           >
             <Gear size={14} />
@@ -215,7 +283,7 @@ export default function App() {
           <button
             onClick={pause}
             disabled={!running && state !== "paused"}
-            aria-label="Pause"
+            aria-label={state === "paused" ? "Resume shift" : "Pause shift"}
             className="tool-button h-full disabled:opacity-25"
           >
             <Pause size={14} />
@@ -223,9 +291,15 @@ export default function App() {
         </div>
       </header>
 
-      <main className="relative flex min-h-0 flex-1 flex-col bg-deck lg:flex-row">
+      <main
+        aria-label="Game board"
+        className="relative flex min-h-0 flex-1 flex-col bg-deck lg:flex-row"
+      >
         {(running || state === "paused") && (
-          <aside className="hidden w-[224px] shrink-0 flex-col border-r border-line lg:flex">
+          <aside
+            aria-label="Loadout"
+            className="hidden w-[224px] shrink-0 flex-col border-r border-line lg:flex"
+          >
             <DeployBar snap={snap} onSelect={select} />
             <Legend />
           </aside>
@@ -238,10 +312,25 @@ export default function App() {
             snap.danger && running && "outline outline-1 -outline-offset-1 outline-alarm/70",
           )}
         >
-          <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+          <canvas
+          ref={canvasRef}
+          className="absolute inset-0 h-full w-full"
+          role="application"
+          tabIndex={0}
+          aria-label="Server floor. Arrow keys move, 1 to 3 choose a unit, Space deploys, X scraps, F reboots, P pauses. Tab leaves the floor."
+          aria-describedby="floor-cursor"
+        />
+          <p id="floor-cursor" className="sr-only" role="status" aria-live="polite">{cursorDescription}</p>
 
           {(running || state === "paused") && (
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-9 items-center gap-3 border-b border-line/50 bg-black/35 px-3 backdrop-blur-[2px]">
+            <div
+              className={cn(
+                "pointer-events-none absolute inset-x-0 top-0 z-10 flex h-9 items-center gap-3 border-b px-3 backdrop-blur-[2px]",
+                critical
+                  ? "critical-band border-alarm/60"
+                  : "border-line/50 bg-black/35",
+              )}
+            >
               <ShiftBadge snap={snap} />
               <span className="h-3 w-px bg-line" />
               <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.18em] text-ash">
@@ -253,7 +342,14 @@ export default function App() {
                   style={{ width: `${Math.max(0, Math.min(100, (1 - snap.phaseLeft / 26) * 100))}%` }}
                 />
               </div>
-              <span className="text-[9px] tabular-nums tracking-[0.12em] text-ash">{formatTime(snap.time)}</span>
+              <span className="text-[9px] tabular-nums tracking-[0.12em] text-ash">
+                {formatTime(snap.time)}
+              </span>
+              {critical && (
+                <span className="anim-alarm border border-alarm px-1.5 py-0.5 text-[9px] tracking-[0.16em] text-alarm">
+                  Thermal
+                </span>
+              )}
             </div>
           )}
 
@@ -275,29 +371,53 @@ export default function App() {
           )}
 
           {running && snap.combo > 0 && (
-            <div className="pointer-events-none absolute bottom-4 right-4 z-10 border-r-2 border-fiber pr-3 text-right">
-              <div className="text-[8px] uppercase tracking-[0.18em] text-ash">Link chain</div>
-              <div className="font-display text-2xl leading-none tabular-nums text-fiber">×{snap.comboMult.toFixed(1)}</div>
+            <div className="pointer-events-none absolute bottom-10 right-4 z-10 border-r-2 border-fiber pr-3 text-right">
+              <div className="text-[9px] uppercase tracking-[0.18em] text-ash">Link chain</div>
+              <div className="font-display text-2xl leading-none tabular-nums text-fiber">
+                ×{snap.comboMult.toFixed(1)}
+              </div>
               <div className="mt-1 h-px w-16 bg-white/10">
                 <div className="h-full bg-fiber" style={{ width: `${(snap.comboLeft / 5) * 100}%` }} />
               </div>
             </div>
           )}
 
-          {running && engineRef.current?.hint && (
-            <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 max-w-[80%] -translate-x-1/2 border-y border-rack/35 bg-black/60 px-4 py-1.5 text-center text-[9px] uppercase tracking-[0.16em] text-rack backdrop-blur-sm">
-              {engineRef.current.hint}
-            </div>
+          {running && (
+            <ObjectiveBand
+              snap={snap}
+              hint={engineRef.current?.hint || undefined}
+              control={isTouch ? "Tap floor to deploy / hold unit to scrap" : "Space deploy / X scrap / P pause"}
+            />
           )}
 
-          {state === "idle" && <StartScreen onStart={start} scores={scores} />}
-          {state === "paused" && <PauseScreen onResume={pause} onRestart={start} />}
-          {state === "over" && (
+          {/* Announces state changes to assistive tech without visual clutter. */}
+          <div className="sr-only" role="status" aria-live="assertive">
+            {snap.danger
+              ? "Thermal critical. Deploy coolant immediately."
+              : snap.reboot > 0
+                ? "Power distribution unit offline. Reboot required."
+                : ""}
+          </div>
+
+          {state === "idle" && (
+            <StartScreen
+              onStart={start}
+              scores={scores}
+              seenCount={snap.seenConcepts.length}
+              onOpenCodex={() => setCodexOpen(true)}
+            />
+          )}
+          {state === "paused" && !snap.pendingConcept && !settingsOpen && !codexOpen && (
+            <PauseScreen snap={snap} onResume={pause} onRestart={start} />
+          )}
+          {state === "over" && !settingsOpen && !codexOpen && (
             <GameOverScreen
               snap={snap}
               scores={scores}
+              bestScore={bestScore}
               onRestart={start}
               onSubmit={submit}
+              onOpenCodex={() => setCodexOpen(true)}
               saved={saved}
             />
           )}
@@ -309,10 +429,23 @@ export default function App() {
             settings={snap.settings}
             onChange={applySettings}
           />
+
+          {/* Teaching surfaces sit above every other overlay. */}
+          <Codex
+            open={codexOpen}
+            onClose={() => setCodexOpen(false)}
+            seen={snap.seenConcepts}
+          />
+          {snap.pendingConcept && (
+            <ConceptCard key={snap.pendingConcept} id={snap.pendingConcept} onDismiss={dismissConcept} />
+          )}
         </section>
 
         {(running || state === "paused") && (
-          <aside className="hidden w-[266px] shrink-0 flex-col border-l border-line lg:flex">
+          <aside
+            aria-label="Telemetry"
+            className="hidden w-[266px] shrink-0 flex-col border-l border-line lg:flex"
+          >
             <Telemetry snap={snap} />
             <LogFeed snap={snap} />
           </aside>
@@ -320,22 +453,13 @@ export default function App() {
 
         {(running || state === "paused") && (
           <div className="mobile-deck shrink-0 border-t border-line bg-deck lg:hidden">
-            <div className="mobile-summary flex items-end justify-between px-3 py-2">
-              <ScoreBadge snap={snap} />
-              <div className="text-right text-[8px] uppercase leading-4 tracking-[0.16em] text-ash/65">
-                <div>Phase {snap.phase} / {formatTime(snap.time)}</div>
-                <div className={isTouch ? "text-cool" : "text-ash/45"}>
-                  {isTouch ? "Tap deploy / hold scrap" : "Space deploy / X scrap"}
-                </div>
-              </div>
-            </div>
-            <div className="mobile-meters grid grid-cols-2 gap-4 border-t border-line/60 px-3 py-2">
+            <div className="mobile-meters grid grid-cols-2 gap-4 px-3 py-2">
               <Meter
-                label="Core temp"
+                label="Thermal stress"
                 value={heatPct}
                 color={heatColor}
                 danger={heatPct > 0.82}
-                right={`${snap.coreTemp.toFixed(0)}°`}
+                right={`${snap.coreTemp.toFixed(0)} / 100`}
               />
               <Meter
                 label="Bus load"
@@ -346,11 +470,18 @@ export default function App() {
               />
             </div>
             <DeployBar snap={snap} onSelect={select} compact />
+            <details className="max-h-40 overflow-y-auto border-t border-line px-3 text-xs">
+              <summary className="cursor-pointer py-2 text-cool">Floor status and controls</summary>
+              <p className="py-2">Stress {snap.coreTemp.toFixed(0)}/100 · Load {Math.round(snap.load * 100)}% · Model PUE {Number.isFinite(snap.pue) ? snap.pue.toFixed(2) : "—"}</p>
+              <p className="pb-2">Tap an empty cell to build. Tap an offline unit to reboot. Hold a unit to scrap; drag off to cancel.</p>
+              <p className="pb-2">{snap.log[0]?.text}</p>
+              <button className="action-secondary mb-2" onClick={() => canvasRef.current?.focus()}>Focus floor for keyboard play</button>
+            </details>
           </div>
         )}
       </main>
 
-      <footer className="relative z-10 hidden h-6 shrink-0 items-center justify-between border-t border-line bg-deck px-3 text-[8px] uppercase tracking-[0.18em] text-ash/45 lg:flex">
+      <footer className="relative z-10 hidden h-6 shrink-0 items-center justify-between border-t border-line bg-deck px-3 text-[9px] uppercase tracking-[0.18em] text-ash/45 lg:flex">
         <span><span className="mr-2 inline-block h-1 w-1 bg-ok" />NOC uplink / stable</span>
         <span>Chiller loop 02 / nominal</span>
         <span>Fiber trunk 12 / 400G</span>

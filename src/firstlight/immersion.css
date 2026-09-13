@@ -1,0 +1,248 @@
+/* Atmospheric presentation. Mission layout stays in firstLight.css. */
+.fl-game {
+  --fl-text: #edf0ef;
+  --fl-muted: #a3b0b9;
+  --fl-accent: #e2c990;
+  --fl-dark: #14212b;
+  --fl-ink: #1c2932;
+  background: #17232d;
+}
+.fl-world-canvas {
+  touch-action: none;
+  cursor: grab;
+}
+.fl-world-canvas.is-dragging {
+  cursor: grabbing;
+}
+.fl-game .fl-vignette {
+  background: linear-gradient(
+    180deg,
+    #071322b0,
+    transparent 25%,
+    transparent 66%,
+    #07132285
+  );
+}
+.fl-game.fl-is-entry .fl-vignette {
+  background:
+    linear-gradient(
+      90deg,
+      #101e2cec,
+      #101e2cc0 24%,
+      #101e2c16 63%,
+      transparent 80%
+    ),
+    linear-gradient(180deg, #101e2c60, transparent 45%, #101e2c85);
+}
+.fl-brand-mark i {
+  background: #e2e7e9;
+}
+.fl-brand-mark i:last-child {
+  background: #e2c990;
+}
+.fl-topbar {
+  background: linear-gradient(180deg, #0d1b267a, transparent);
+}
+.fl-game .fl-icon {
+  border-radius: 5px;
+  background-color: #18283485;
+  color: #edf0ef;
+}
+.fl-game .fl-icon:hover {
+  background-color: #334654;
+}
+.fl-game .fl-view-toggle {
+  width: auto;
+  padding: 0 12px;
+  gap: 7px;
+}
+.fl-view-toggle span {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+.fl-scene-clock {
+  font-variant-numeric: tabular-nums;
+}
+.fl-game .fl-primary {
+  background: #e3c993;
+  color: #1b2930;
+  box-shadow: 0 2px 16px #050c1326;
+}
+.fl-game .fl-primary:hover {
+  background: #f0dcae;
+}
+.fl-game .fl-assignment {
+  background: linear-gradient(145deg, #172733ef, #172733db);
+  border-color: #c3d4df29;
+  box-shadow: 0 12px 36px #030b1526;
+}
+.fl-game .fl-status-strip {
+  background: #142530da;
+  border-color: #c3d4df29;
+}
+.fl-game .fl-utility-row button {
+  background: #162733d9;
+  border-color: #c3d4df30;
+}
+.fl-game .fl-inspector {
+  background: linear-gradient(145deg, #1a2c39f7, #13242ff7);
+  border-color: #b5c8d538;
+  box-shadow: 0 16px 48px #020a1c40;
+}
+.fl-game .fl-world-marker {
+  background: #152b3ce8;
+  border-color: #b8d1e078;
+  color: #f1f3ee;
+  box-shadow: 0 4px 16px #030d1e40;
+}
+.fl-game .fl-world-marker.is-selected {
+  border-color: #f0cf8e;
+  background: #2d3d45;
+}
+.fl-game .fl-marker-dot {
+  background: #e1c78d;
+}
+.fl-view-console {
+  position: absolute;
+  z-index: 15;
+  top: 91px;
+  right: 34px;
+  width: 326px;
+  padding: 18px;
+  color: #ecf0f2;
+  border: 1px solid #adc3d539;
+  background: #142633f5;
+  box-shadow: 0 18px 60px #020a205c;
+  backdrop-filter: blur(18px);
+  border-radius: 8px;
+  max-height: calc(100dvh - 118px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fl-view-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.fl-view-heading > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.fl-view-heading .fl-icon {
+  width: 32px;
+  height: 32px;
+}
+.fl-game .fl-view-console p {
+  font-size: 12px;
+  color: #a9bbc7;
+  margin: 5px 0 16px;
+}
+.fl-view-presets,
+.fl-light-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.fl-view-console button {
+  min-height: 38px;
+  border-radius: 4px;
+  color: #c3d0d9;
+  background: #273b4b;
+}
+.fl-view-presets button,
+.fl-light-presets button {
+  font-size: 11px;
+  padding: 7px 4px;
+}
+.fl-view-console button:hover {
+  background: #3b5060;
+  color: #fff;
+}
+.fl-view-console button[aria-pressed="true"] {
+  background: #dbc497;
+  color: #172733;
+}
+.fl-lighting-label {
+  display: flex;
+  justify-content: space-between;
+  margin: 23px 0 10px;
+  font:
+    9px ui-monospace,
+    monospace;
+  letter-spacing: 0.07em;
+  color: #d8e0e6;
+}
+.fl-lighting-label span {
+  color: #94a9b9;
+  letter-spacing: 0;
+}
+.fl-light-presets button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 12px 2px;
+}
+.fl-game .fl-view-console .fl-view-hint {
+  margin: 18px 0 10px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.fl-view-adjust {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+.fl-view-adjust button {
+  font-size: 19px;
+}
+.fl-view-console .fl-view-reset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: 1px solid #8aabbe3b;
+  font-size: 11px;
+  margin-top: 8px;
+}
+.fl-view-console small {
+  display: block;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #8da5b6;
+  margin-top: 15px;
+}
+@media (max-width: 700px) {
+  .fl-game .fl-view-toggle {
+    width: 34px;
+    padding: 0;
+  }
+  .fl-view-toggle span {
+    display: none;
+  }
+  .fl-view-console {
+    top: 77px;
+    right: 14px;
+    width: min(326px, calc(100vw - 28px));
+    max-height: calc(100dvh - 97px);
+    padding: 16px;
+  }
+  .fl-view-heading .fl-icon {
+    width: 40px;
+    height: 40px;
+  }
+  .fl-view-console button {
+    min-height: 42px;
+  }
+  .fl-game.fl-is-entry .fl-vignette {
+    background:
+      linear-gradient(90deg, #101e2cba, #101e2c30),
+      linear-gradient(180deg, #101e2c60, transparent 42%, #101e2cd9);
+  }
+}

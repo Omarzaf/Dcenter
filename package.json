@@ -1,26 +1,39 @@
 {
-  "name": "react-vite-tailwind",
+  "name": "core-infrastructure-game",
   "private": true,
-  "version": "0.0.0",
+  "version": "6.0.0",
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22.18.0 <23"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "pnpm story:build && tsc --noEmit && vite build && node tools/write-release.mjs",
+    "story:build": "node tools/compile-story.mjs",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node tools/test.mjs",
+    "test:e2e": "playwright test",
+    "verify": "pnpm build && pnpm test && pnpm test:e2e"
   },
   "dependencies": {
     "clsx": "2.1.1",
+    "inkjs": "2.4.0",
     "lucide-react": "^1.33.0",
+    "playcanvas": "2.22.2",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "tailwind-merge": "3.4.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "4.1.17",
     "@types/node": "22.19.17",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
+    "prettier": "^3.9.6",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "vite": "7.3.2",

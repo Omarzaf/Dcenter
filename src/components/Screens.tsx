@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Keyboard,
@@ -7,11 +7,14 @@ import {
   RotateCcw,
   Skull,
   Trophy,
+  BookOpen,
 } from "lucide-react";
 import { formatScore, formatTime, type ScoreEntry } from "../game/storage";
-import type { Snapshot } from "../game/types";
+import { gradeRun, pueBand } from "../game/curriculum";
+import { ACHIEVEMENTS, type Snapshot } from "../game/types";
 import { cn } from "../utils/cn";
-import { UnitIcon } from "./Hud";
+import { RunSummary, UnitIcon } from "./Hud";
+import { useModal } from "./useModal";
 
 export function ScoreTable({
   scores,
@@ -28,7 +31,7 @@ export function ScoreTable({
         <div className="section-label">
           <Trophy size={11} className="text-power" /> Local records
         </div>
-        <span className="text-[8px] tracking-[0.18em] text-ash/50">TOP 08</span>
+        <span className="text-[9px] tracking-[0.18em] text-ash/50">TOP 08</span>
       </div>
       {scores.length === 0 ? (
         <p className="border-t border-line/60 py-4 text-[10px] text-ash/55">
@@ -37,7 +40,7 @@ export function ScoreTable({
       ) : (
         <table className="w-full border-collapse text-[10px] tabular-nums">
           <thead>
-            <tr className="border-y border-line/60 text-[8px] uppercase tracking-[0.16em] text-ash/50">
+            <tr className="border-y border-line/60 text-[9px] uppercase tracking-[0.16em] text-ash/50">
               <th className="py-1.5 text-left font-normal">Rank</th>
               <th className="py-1.5 text-left font-normal">Ops</th>
               <th className="py-1.5 text-right font-normal">Score</th>
@@ -86,9 +89,13 @@ function ControlLine({ keys, label }: { keys: string[]; label: string }) {
 export function StartScreen({
   onStart,
   scores,
+  seenCount,
+  onOpenCodex,
 }: {
   onStart: () => void;
   scores: ScoreEntry[];
+  seenCount: number;
+  onOpenCodex: () => void;
 }) {
   return (
     <div className="screen-veil grain absolute inset-0 z-30 overflow-y-auto">
@@ -115,19 +122,29 @@ export function StartScreen({
                 </span>
               </h1>
               <p className="mt-6 max-w-lg border-l border-power/70 pl-4 text-[12px] leading-6 text-ash">
-                Link rack clusters. Carry the power load. Keep the core below 100°.
+                Link rack clusters. Carry the power load. Keep thermal stress below 100.
                 Throughput pays; heat compounds.
+              </p>
+              <p className="mt-3 max-w-lg text-[11px] leading-5 text-ash/65">
+                A simplified operations lab. Stress is a game index, not a temperature in Celsius.
+                The codex connects your choices to engineering concepts; model PUE is not a measured facility benchmark.
               </p>
             </div>
           </div>
 
           <div className="anim-slidein mt-10 [animation-delay:120ms]">
-            <button onClick={onStart} className="action-primary w-full sm:w-[320px]">
-              <span>Begin shift</span>
-              <span className="flex items-center gap-2 text-[10px] tracking-[0.08em]">
-                SPACE <ArrowRight size={16} />
-              </span>
-            </button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+              <button onClick={onStart} className="action-primary w-full sm:w-[320px]">
+                <span>Begin shift</span>
+                <span className="flex items-center gap-2 text-[10px] tracking-[0.08em]">
+                  SPACE <ArrowRight size={16} />
+                </span>
+              </button>
+              <button onClick={onOpenCodex} className="action-secondary">
+                <BookOpen size={13} /> Codex
+                <span className="text-ash/45">{seenCount}/18</span>
+              </button>
+            </div>
             <div className="measure-line mt-7 h-2 border-x border-ash/25" />
             <div className="mt-3 grid grid-cols-4 gap-3">
               {(["rack", "cool", "power", "fiber"] as const).map((type, index) => (
@@ -179,6 +196,7 @@ export function StartScreen({
 
             <div className="mt-6 lg:mt-auto">
               <ScoreTable scores={scores.slice(0, 5)} compact />
+
             </div>
           </div>
         </aside>
@@ -188,14 +206,24 @@ export function StartScreen({
 }
 
 export function PauseScreen({
+  snap,
   onResume,
   onRestart,
 }: {
+  snap: Snapshot;
   onResume: () => void;
   onRestart: () => void;
 }) {
+  const modalRef = useModal(true, onResume);
   return (
-    <div className="screen-veil absolute inset-0 z-30 flex items-center px-5 sm:px-12">
+    <div
+      ref={modalRef}
+      tabIndex={-1}
+      className="screen-veil absolute inset-0 z-30 flex items-center overflow-y-auto px-5 sm:px-12"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Shift paused"
+    >
       <div className="anim-slidein frame-corners w-full max-w-xl px-5 py-7 sm:px-8">
         <div className="flex items-center gap-2 text-[9px] uppercase tracking-[0.24em] text-cool">
           <Pause size={12} /> Simulation hold
@@ -206,6 +234,9 @@ export function PauseScreen({
         <p className="mt-3 border-l border-cool/60 pl-3 text-[11px] leading-5 text-ash">
           Simulation clock stopped. Thermal state and bus load are held.
         </p>
+
+        <RunSummary snap={snap} />
+
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <button onClick={onResume} className="action-primary min-w-[230px]">
             <span>Resume</span>
@@ -223,17 +254,40 @@ export function PauseScreen({
 export function GameOverScreen({
   snap,
   scores,
+  bestScore,
   onRestart,
   onSubmit,
+  onOpenCodex,
   saved,
 }: {
   snap: Snapshot;
   scores: ScoreEntry[];
+  bestScore: number;
   onRestart: () => void;
   onSubmit: (tag: string) => void;
+  onOpenCodex: () => void;
   saved: boolean;
 }) {
   const [tag, setTag] = useState("OPS");
+  const modalRef = useModal(true, onRestart);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const isRecord = snap.score > bestScore && bestScore > 0;
+  const earned = snap.achievements;
+  const band = pueBand(snap.avgPue);
+  const assessment = gradeRun({
+    avgPue: snap.avgPue,
+    peakTemp: snap.peakTemp,
+    phase: snap.phase,
+    redundantPowerAtEnd: snap.redundantPower,
+    throttledSeconds: snap.throttled,
+    uptime: snap.time,
+  });
+
+  // Auto-focus the initials field so the save path is Enter -> done.
+  useEffect(() => {
+    if (!saved) inputRef.current?.focus();
+  }, [saved]);
+
   const rows = [
     ["Data shipped", `${snap.data.toFixed(1)} TB`],
     ["Uptime", formatTime(snap.time)],
@@ -243,25 +297,39 @@ export function GameOverScreen({
   ] as const;
 
   return (
-    <div className="screen-veil grain absolute inset-0 z-30 overflow-y-auto px-5 py-6 sm:px-8 lg:px-12">
+    <div
+      ref={modalRef}
+      tabIndex={-1}
+      className="screen-veil grain absolute inset-0 z-30 overflow-y-auto px-5 py-6 sm:px-8 lg:px-12"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Incident report"
+    >
       <div className="mx-auto grid min-h-full w-full max-w-[1000px] content-center gap-10 lg:grid-cols-[minmax(0,1fr)_330px]">
         <section className="anim-slidein">
-          <div className="flex items-center gap-2 text-[9px] uppercase tracking-[0.25em] text-alarm">
-            <Skull size={13} /> Incident 07-A / Thermal runaway
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] uppercase tracking-[0.25em] text-alarm">
+            <span className="flex items-center gap-2">
+              <Skull size={13} /> Incident 07-A / Thermal runaway
+            </span>
+            {isRecord && (
+              <span className="border border-power px-1.5 py-0.5 text-[9px] tracking-[0.18em] text-power">
+                New facility record
+              </span>
+            )}
           </div>
           <h2 className="mt-4 font-display text-[clamp(3.2rem,10vw,7.4rem)] font-bold uppercase leading-[0.76] tracking-[-0.055em] text-[#e0e3df]">
             Core
-            <span className="block text-alarm">meltdown</span>
+            <span className="block text-alarm">shutdown</span>
           </h2>
           <div className="mt-8 flex items-end justify-between border-y border-alarm/45 py-4">
             <div>
-              <div className="text-[8px] uppercase tracking-[0.24em] text-ash">Final score</div>
+              <div className="text-[9px] uppercase tracking-[0.24em] text-ash">Final score</div>
               <div className="font-display text-[clamp(2.6rem,8vw,5rem)] leading-none tabular-nums text-power">
                 {formatScore(snap.score)}
               </div>
             </div>
             <span className="hidden max-w-[190px] text-right text-[9px] leading-4 text-ash/60 sm:block">
-              Core crossed 100°. Incident logged. Floor simulation terminated.
+              Thermal stress reached 100. This is the game's shutdown threshold, not a physical temperature.
             </span>
           </div>
 
@@ -274,10 +342,113 @@ export function GameOverScreen({
             ))}
           </dl>
 
+          {/* Engineering debrief: what the run demonstrated, not just its score. */}
+          <section className="mt-7 border-t border-line pt-4">
+            <div className="flex items-baseline justify-between">
+              <div className="section-label">Shift debrief</div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-[9px] uppercase tracking-[0.16em] text-ash/60">Grade</span>
+                <span
+                  className="font-display text-2xl leading-none"
+                  style={{ color: assessment.color }}
+                >
+                  {assessment.grade}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-x-6 sm:grid-cols-4">
+              {[
+                {
+                  label: "Model PUE",
+                  value: isFinite(snap.avgPue) ? snap.avgPue.toFixed(2) : "—",
+                  tone: band.color,
+                  foot: band.label,
+                },
+                {
+                  label: "Peak stress",
+                  value: `${snap.peakTemp.toFixed(0)}/100`,
+                  tone: snap.peakTemp > 90 ? "#d9544f" : snap.peakTemp > 70 ? "#d6a243" : "#80b784",
+                  foot: snap.peakTemp > 90 ? "Minimal margin" : "Margin held",
+                },
+                {
+                  label: "Throttled",
+                  value: `${snap.throttled.toFixed(0)}s`,
+                  tone: snap.throttled > 25 ? "#d9544f" : snap.throttled > 5 ? "#d6a243" : "#80b784",
+                  foot: snap.throttled > 5 ? "Work lost to heat" : "Clean thermals",
+                },
+                {
+                  label: "Final supply",
+                  value: snap.redundantPower ? "+1 spare" : "No spare",
+                  tone: snap.redundantPower ? "#80b784" : "#cf784d",
+                  foot: "End-of-run capacity",
+                },
+              ].map((metric) => (
+                <div key={metric.label} className="border-b border-line/50 py-2">
+                  <div className="text-[9px] uppercase tracking-[0.14em] text-ash/60">
+                    {metric.label}
+                  </div>
+                  <div
+                    className="font-display text-lg leading-tight tabular-nums"
+                    style={{ color: metric.tone }}
+                  >
+                    {metric.value}
+                  </div>
+                  <div className="text-[9px] text-ash/45">{metric.foot}</div>
+                </div>
+              ))}
+            </div>
+
+            <ul className="mt-3 space-y-1">
+              {assessment.notes.map((note) => (
+                <li key={note} className="flex gap-2 text-[10px] leading-4 text-ash">
+                  <span className="mt-1 h-1 w-1 shrink-0 bg-ash/40" />
+                  {note}
+                </li>
+              ))}
+            </ul>
+
+            {snap.seenConcepts.length > 0 && (
+              <button
+                onClick={onOpenCodex}
+                className="mt-3 flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-cool transition hover:text-[#d8dee3]"
+              >
+                <BookOpen size={12} />
+                {snap.seenConcepts.length} concepts demonstrated / open codex
+              </button>
+            )}
+          </section>
+
+          {earned.length > 0 && (
+            <div className="mt-6 max-w-lg">
+              <div className="text-[9px] uppercase tracking-[0.2em] text-ash/60">
+                Directives completed / {earned.length}
+              </div>
+              <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+                {earned.map((id) => (
+                  <li
+                    key={id}
+                    className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.14em] text-power"
+                  >
+                    <span className="h-1 w-1 bg-power" />
+                    {ACHIEVEMENTS[id].label}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
             {!saved ? (
-              <div className="flex border-y border-line">
+              <form
+                className="flex border-y border-line"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  onSubmit(tag || "OPS");
+                }}
+              >
                 <input
+                  ref={inputRef}
                   value={tag}
                   maxLength={3}
                   onChange={(event) =>
@@ -287,12 +458,12 @@ export function GameOverScreen({
                   aria-label="Operator initials"
                 />
                 <button
-                  onClick={() => onSubmit(tag || "OPS")}
+                  type="submit"
                   className="px-4 font-display text-[11px] uppercase tracking-[0.16em] text-power transition hover:bg-power/[0.08]"
                 >
                   Log record
                 </button>
-              </div>
+              </form>
             ) : (
               <div className="flex h-12 items-center border-y border-ok/40 px-4 text-[10px] uppercase tracking-[0.16em] text-ok">
                 Record logged / {tag || "OPS"}
