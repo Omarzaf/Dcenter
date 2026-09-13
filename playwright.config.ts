@@ -5,6 +5,11 @@ export default defineConfig({
   fullyParallel: true,
   // Browser workers share one GPU; serial scenes avoid artificial contention.
   workers: 1,
+  // Hosted runners render WebGL in software; keep the same assertions with
+  // enough time for shader compilation and full story interactions.
+  timeout: process.env.CI ? 90_000 : 30_000,
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
+  maxFailures: process.env.CI ? 2 : undefined,
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"]],
   use: {
@@ -12,7 +17,8 @@ export default defineConfig({
     // path, rather than the separate legacy headless-shell implementation.
     channel: "chromium",
     baseURL: "http://127.0.0.1:4180",
-    trace: "retain-on-failure",
+    // Recording every frame of every 3D test overwhelms software rendering.
+    trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
   projects: [

@@ -121,7 +121,7 @@ pnpm preview --host 127.0.0.1 --port 4177
 
 `pnpm verify` runs build, native tests, and browser tests in order. Browser checks
 own port **4180**, use full Chromium's current headless mode with one worker, and save
-failure screenshots/traces under `test-results/`. The suite includes 54 native
+failure screenshots and retry traces under `test-results/`. The suite includes 54 native
 checks and 54 Chromium browser checks across desktop and phone emulation.
 GitHub Actions runs the same suite for every pull request and update to `main`.
 
