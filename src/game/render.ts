@@ -76,12 +76,13 @@ function seedMotes(w: number, h: number) {
 
 export function draw(eng: Engine, w: number, h: number) {
   const ctx = eng.ctx;
-  const t = eng.t;
+  const still = eng.reducedMotion || eng.settings.shake === 0;
+  const t = still ? 0 : eng.t;
   ctx.setTransform(eng.dpr, 0, 0, eng.dpr, 0, 0);
   if (!motes.length) seedMotes(w, h);
 
   /* ---------------- backdrop ---------------- */
-  const shakeScale = eng.settings?.shake ?? 1;
+  const shakeScale = still ? 0 : eng.settings.shake;
   const bg = ctx.createLinearGradient(0, 0, w, h);
   bg.addColorStop(0, "#070c15");
   bg.addColorStop(0.55, "#05080f");
@@ -111,8 +112,8 @@ export function draw(eng: Engine, w: number, h: number) {
   ctx.fillRect(0, 0, w, h);
 
   // drifting data motes (slowed when motion is reduced)
-  const motesSpeed = (shakeScale < 0.2 ? 0.3 : 1) * (shakeScale < 0.6 ? 0.7 : 1);
-  ctx.fillStyle = "#4aa8ff";
+  const motesSpeed = still ? 0 : (shakeScale < 0.2 ? 0.3 : 1) * (shakeScale < 0.6 ? 0.7 : 1);
+  ctx.fillStyle = "#69a6d7";
   for (const m of motes) {
     m.y -= m.v * 0.016 * motesSpeed;
     if (m.y < -4) {
@@ -272,7 +273,7 @@ export function draw(eng: Engine, w: number, h: number) {
     const cx = ox + eng.cursor.x * cell;
     const cy = oy + eng.cursor.y * cell;
     const target = eng.grid[ci];
-    const col = target.unit ? "#ff3b47" : UNITS[eng.queue[eng.selected]].color;
+    const col = target.unit ? "#d9544f" : UNITS[eng.queue[eng.selected]].color;
     const pulse = 0.55 + 0.45 * Math.sin(t * 6);
     ctx.save();
     ctx.strokeStyle = col;
@@ -297,7 +298,7 @@ export function draw(eng: Engine, w: number, h: number) {
     // hold-to-scrap ring
     const prog = eng.holdProgress();
     if (prog > 0) {
-      ctx.strokeStyle = "#ff3b47";
+      ctx.strokeStyle = "#d9544f";
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(cx + cell / 2, cy + cell / 2, cell * 0.42, -Math.PI / 2, -Math.PI / 2 + prog * Math.PI * 2);
@@ -313,7 +314,7 @@ export function draw(eng: Engine, w: number, h: number) {
   /* ---------------- particles ---------------- */
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  for (const p of eng.particles) {
+  for (const p of still ? [] : eng.particles) {
     const a = Math.max(0, p.life / p.max);
     if (p.kind === 2) {
       ctx.strokeStyle = p.color;
@@ -339,7 +340,7 @@ export function draw(eng: Engine, w: number, h: number) {
   /* ---------------- floating text ---------------- */
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  for (const f of eng.floaters) {
+  for (const f of still ? [] : eng.floaters) {
     const a = Math.min(1, f.life * 1.6);
     ctx.globalAlpha = a;
     ctx.font = `600 ${f.size}px "IBM Plex Mono", monospace`;
@@ -373,7 +374,7 @@ export function draw(eng: Engine, w: number, h: number) {
   ctx.fillStyle = sw;
   ctx.fillRect(0, sy - 40, w, 80);
 
-  if (eng.flash > 0.01) {
+  if (!still && eng.flash > 0.01) {
     ctx.globalAlpha = Math.min(0.55, eng.flash * 0.5);
     ctx.fillStyle = eng.flashColor;
     ctx.fillRect(0, 0, w, h);
@@ -415,12 +416,13 @@ function drawUnit(
   const x = eng.cx(i);
   const y = eng.cy(i);
   const r = eng.cell * 0.34;
-  const t = eng.t;
-  const pop = c.pop > 0 ? 1 + Math.sin(c.pop * Math.PI) * 0.22 : 1;
+  const still = eng.reducedMotion || eng.settings.shake === 0;
+  const t = still ? 0 : eng.t;
+  const pop = !still && c.pop > 0 ? 1 + Math.sin(c.pop * Math.PI) * 0.22 : 1;
   const def = UNITS[type as keyof typeof UNITS];
   const offline = c.offline > 0;
   const linked = type === "rack" && c.podSize >= 3;
-  const brown = eng.load > 1;
+  const brown = !still && eng.load > 1;
 
   ctx.save();
   ctx.translate(x, y);
@@ -446,7 +448,7 @@ function drawUnit(
   ctx.globalAlpha = 1;
 
   if (offline) {
-    ctx.strokeStyle = "#ff3b47";
+    ctx.strokeStyle = "#d9544f";
     ctx.lineWidth = 2;
     const q = r * 0.9;
     ctx.beginPath();
@@ -456,7 +458,7 @@ function drawUnit(
     ctx.lineTo(-q, q);
     ctx.stroke();
     ctx.font = `600 ${Math.max(7, eng.cell * 0.17)}px "IBM Plex Mono", monospace`;
-    ctx.fillStyle = "#ff3b47";
+    ctx.fillStyle = "#d9544f";
     ctx.textAlign = "center";
     ctx.fillText("REBOOT", 0, r + eng.cell * 0.24);
   } else if (c.throttle > 0.4) {

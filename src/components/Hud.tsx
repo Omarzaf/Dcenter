@@ -12,6 +12,7 @@ import {
   Zap,
 } from "lucide-react";
 import { formatScore, formatTime } from "../game/storage";
+import { pueBand } from "../game/curriculum";
 import { UNITS, type Snapshot, type UnitType } from "../game/types";
 import { cn } from "../utils/cn";
 
@@ -60,6 +61,11 @@ export function Meter({
             boxShadow: danger ? `0 0 12px ${color}` : "none",
           }}
         />
+        <span
+          className="absolute inset-y-0 w-px bg-white/25"
+          style={{ left: "82%" }}
+          aria-hidden="true"
+        />
         <div className="absolute inset-0 grid grid-cols-4">
           <span className="border-r border-void/60" />
           <span className="border-r border-void/60" />
@@ -99,10 +105,9 @@ export function DeployBar({
           return (
             <button
               key={`${index}-${unit}`}
-              onClick={(event) => {
-                event.currentTarget.blur();
-                onSelect(index);
-              }}
+              onClick={() => onSelect(index)}
+              aria-pressed={active}
+              aria-label={`${def.name}, loadout ${index + 1}`}
               className={cn(
                 "group relative text-left transition-colors duration-150 active:bg-white/[0.06]",
                 compact
@@ -232,6 +237,7 @@ export function Telemetry({ snap }: { snap: Snapshot }) {
   const heatColor = heatPct > 0.82 ? "#d9544f" : heatPct > 0.6 ? "#d6a243" : "#78c8c0";
   const loadPct = Math.min(1, snap.load);
   const loadColor = snap.load > 1 ? "#d9544f" : snap.load > 0.85 ? "#d6a243" : "#80b784";
+  const band = pueBand(snap.pue);
 
   return (
     <section className="rail-section border-b border-line">
@@ -242,11 +248,11 @@ export function Telemetry({ snap }: { snap: Snapshot }) {
 
       <div className="space-y-4 border-t border-line/70 px-3 py-3">
         <Meter
-          label="Core temperature"
+          label="Thermal stress"
           value={heatPct}
           color={heatColor}
           danger={heatPct > 0.82}
-          right={`${snap.coreTemp.toFixed(1)}°`}
+          right={`${snap.coreTemp.toFixed(1)} / 100`}
         />
         <Meter
           label="Bus load"
@@ -255,6 +261,53 @@ export function Telemetry({ snap }: { snap: Snapshot }) {
           danger={snap.load > 1}
           right={`${snap.demand.toFixed(1)} / ${snap.capacity.toFixed(0)}u`}
         />
+      </div>
+
+      {/* PUE: the primary efficiency metric, shown with its quality band. */}
+      <div className="border-t border-line/70 px-3 py-3">
+        <div className="flex items-end justify-between">
+          <span className="text-[9px] uppercase tracking-[0.2em] text-ash">
+            Model PUE
+            <span className="ml-1.5 normal-case tracking-normal text-ash/45">
+              facility / IT
+            </span>
+          </span>
+          <span
+            className="font-display text-[18px] leading-none tabular-nums"
+            style={{ color: band.color }}
+          >
+            {isFinite(snap.pue) ? snap.pue.toFixed(2) : "—"}
+          </span>
+        </div>
+        <div className="relative mt-2 h-[5px] bg-white/[0.06]">
+          {/* 1.0 to 2.2 mapped across the track. */}
+          <div
+            className="absolute inset-y-0 left-0 transition-[width] duration-200"
+            style={{
+              width: `${Math.max(0, Math.min(100, ((Math.min(snap.pue, 2.2) - 1) / 1.2) * 100))}%`,
+              background: band.color,
+            }}
+          />
+          {[
+            { at: 1.2, title: "Model ratio 1.2" },
+            { at: 1.5, title: "Model ratio 1.5" },
+          ].map((mark) => (
+            <span
+              key={mark.at}
+              title={mark.title}
+              className="absolute inset-y-0 w-px bg-white/30"
+              style={{ left: `${((mark.at - 1) / 1.2) * 100}%` }}
+            />
+          ))}
+        </div>
+        <div className="mt-1.5 flex items-baseline justify-between gap-2">
+          <span className="text-[9px] uppercase tracking-[0.14em]" style={{ color: band.color }}>
+            {band.label}
+          </span>
+          <span className="text-[9px] tabular-nums text-ash/55">
+            IT {snap.itLoad.toFixed(1)}u / OH {snap.overhead.toFixed(1)}u
+          </span>
+        </div>
       </div>
 
       <div className="border-t border-line/70 px-3">
@@ -299,6 +352,89 @@ export function Telemetry({ snap }: { snap: Snapshot }) {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Bottom status band. Mirrors the phase band at the top of the board so the
+ * board is bracketed by two read-only HUD strips.
+ */
+export function ObjectiveBand({
+  snap,
+  hint,
+  control,
+}: {
+  snap: Snapshot;
+  hint?: string;
+  control?: string;
+}) {
+  const aside = hint || control;
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex h-8 items-stretch border-t border-line/60 bg-black/45 backdrop-blur-[2px]">
+      <div className="flex min-w-0 flex-1 items-center gap-0 overflow-hidden">
+        {snap.objectives.map((objective, index) => (
+          <div
+            key={objective.label}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 sm:px-3",
+              index > 0 && "border-l border-line/50",
+            )}
+          >
+            <span
+              className={cn(
+                "h-1.5 w-1.5 shrink-0",
+                objective.done ? "bg-ok" : "border border-ash/45",
+              )}
+            />
+            <span
+              className={cn(
+                "whitespace-nowrap text-[9px] uppercase tracking-[0.14em]",
+                objective.done ? "text-ok/75" : "text-ash",
+              )}
+            >
+              {objective.label}
+            </span>
+          </div>
+        ))}
+      </div>
+      {aside && (
+        <div className="hidden min-w-0 items-center border-l border-line/50 px-3 sm:flex">
+          <span
+            className={cn(
+              "truncate text-[9px] uppercase tracking-[0.14em]",
+              hint ? "text-rack" : "text-ash/50",
+            )}
+          >
+            {aside}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Read-only run state, used by the pause surface. */
+export function RunSummary({ snap }: { snap: Snapshot }) {
+  const rows = [
+    ["Score", formatScore(snap.score)],
+    ["Data shipped", `${snap.data.toFixed(1)} TB`],
+    ["Thermal stress", `${snap.coreTemp.toFixed(1)}/100`],
+    ["Bus load", `${Math.round(snap.load * 100)}%`],
+    ["PODs", String(snap.pods)],
+    ["Uptime", formatTime(snap.time)],
+  ] as const;
+  return (
+    <dl className="mt-8 grid grid-cols-2 gap-x-8 border-t border-line">
+      {rows.map(([label, value]) => (
+        <div
+          key={label}
+          className="flex items-baseline justify-between border-b border-line/50 py-2"
+        >
+          <dt className="text-[9px] uppercase tracking-[0.16em] text-ash/70">{label}</dt>
+          <dd className="m-0 font-display text-sm tabular-nums text-[#d8dee3]">{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -350,13 +486,13 @@ export function ScoreBadge({ snap }: { snap: Snapshot }) {
   return (
     <div className="flex items-end gap-4">
       <div>
-        <div className="text-[8px] uppercase tracking-[0.24em] text-ash">Score</div>
+        <div className="text-[9px] uppercase tracking-[0.24em] text-ash">Score</div>
         <div className="font-display text-[28px] leading-none tabular-nums text-[#ded8ca]">
           {formatScore(snap.score)}
         </div>
       </div>
       <div className="border-l border-line pl-3">
-        <div className="text-[8px] uppercase tracking-[0.2em] text-ash">Data</div>
+        <div className="text-[9px] uppercase tracking-[0.2em] text-ash">Data</div>
         <div className="font-display text-sm tabular-nums text-cool">{snap.data.toFixed(1)} TB</div>
       </div>
       {snap.combo > 0 && (

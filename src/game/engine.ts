@@ -1,4 +1,6 @@
 import { sfx } from "./audio";
+import { IT_UNITS } from "./types";
+import type { ConceptId } from "./curriculum";
 import {
   ACHIEVEMENTS,
   BASE_CAPACITY,
@@ -12,7 +14,9 @@ import {
   type Cell,
   type GameState,
   type LogLine,
+  type Objective,
   type Snapshot,
+  type PublicSettings,
   type UnitType,
 } from "./types";
 
@@ -86,7 +90,7 @@ export class Engine {
   floaters: Floater[] = [];
   shake = 0;
   flash = 0;
-  flashColor = "#4aa8ff";
+  flashColor = "#69a6d7";
   t = 0;
   alarmClock = 0;
 
@@ -107,15 +111,38 @@ export class Engine {
   achQueue: { id: AchievementId; t: number }[] = [];
   lastCombo = 0;
   scoredPods = 0;
-  settings: { muted: boolean; shake: number; palette: "classic" | "deuteranopia" | "tritanopia" } = {
+  settings: {
+    muted: boolean;
+    shake: number;
+    palette: "classic" | "deuteranopia" | "tritanopia";
+    learnMode: boolean;
+  } = {
     muted: false,
     shake: 1,
     palette: "classic",
+    learnMode: true,
   };
   idleHue = 0;
 
+  /* --- educational layer ------------------------------------------- */
+  pue = Infinity;
+  itLoad = 0;
+  overhead = 0;
+  private pueSum = 0;
+  private pueSamples = 0;
+  throttledSeconds = 0;
+  redundantPower = false;
+  pendingConcept: ConceptId | null = null;
+  seenConcepts = new Set<ConceptId>();
+  /** Concepts already surfaced this run, so a card never repeats mid-run. */
+  private firedThisRun = new Set<ConceptId>();
+
   onSnapshot: ((s: Snapshot) => void) | null = null;
   onState: ((s: GameState) => void) | null = null;
+  onConceptUnlock: ((ids: ConceptId[]) => void) | null = null;
+  reducedMotion = false;
+  private overlayOpen = false;
+  private resumeAfterOverlay = false;
   private snapClock = 0;
   private raf = 0;
   private last = 0;
@@ -140,17 +167,34 @@ export class Engine {
     const pd = (e: PointerEvent) => this.onPointerDown(e);
     const pm = (e: PointerEvent) => this.onPointerMove(e);
     const pu = () => this.onPointerUp();
+    const loseFocus = () => {
+      this.onPointerUp();
+      this.resumeAfterOverlay = false;
+      if (this.state === "running") this.togglePause();
+    };
+    const visibility = () => { if (document.hidden) loseFocus(); };
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updateMotion = () => { this.reducedMotion = motion.matches; };
+    updateMotion();
     const cm = (e: Event) => e.preventDefault();
     window.addEventListener("keydown", kd);
     this.canvas.addEventListener("pointerdown", pd);
     this.canvas.addEventListener("pointermove", pm);
     window.addEventListener("pointerup", pu);
+    window.addEventListener("pointercancel", pu);
+    window.addEventListener("blur", loseFocus);
+    document.addEventListener("visibilitychange", visibility);
+    motion.addEventListener("change", updateMotion);
     this.canvas.addEventListener("contextmenu", cm);
     this.detach = () => {
       window.removeEventListener("keydown", kd);
       this.canvas.removeEventListener("pointerdown", pd);
       this.canvas.removeEventListener("pointermove", pm);
       window.removeEventListener("pointerup", pu);
+      window.removeEventListener("pointercancel", pu);
+      window.removeEventListener("blur", loseFocus);
+      document.removeEventListener("visibilitychange", visibility);
+      motion.removeEventListener("change", updateMotion);
       this.canvas.removeEventListener("contextmenu", cm);
     };
     this.last = performance.now();
@@ -193,6 +237,7 @@ export class Engine {
   /* ------------------------------------------------------------------ */
 
   reset() {
+    this.hold = null;
     this.grid = Array.from({ length: CELLS }, makeCell);
     this.queue = ["rack", "rack", "rack"];
     this.selected = 0;
@@ -230,6 +275,15 @@ export class Engine {
     this.lastCombo = 0;
     this.scoredPods = 0;
     this.tutorialStep = 0;
+    this.pue = Infinity;
+    this.itLoad = 0;
+    this.overhead = 0;
+    this.pueSum = 0;
+    this.pueSamples = 0;
+    this.throttledSeconds = 0;
+    this.redundantPower = false;
+    this.pendingConcept = null;
+    this.firedThisRun.clear();
     this.hint = "DEPLOY 3 SERVER RACKS SIDE-BY-SIDE TO LINK A POD";
     this.log = [];
     this.rebuildPods();
@@ -243,14 +297,30 @@ export class Engine {
     this.setState("running");
   }
 
-  setSettings(
-    patch: Partial<{ muted: boolean; shake: number; palette: "classic" | "deuteranopia" | "tritanopia" }>,
-  ) {
+  setSettings(patch: Partial<PublicSettings>) {
     this.settings = { ...this.settings, ...patch };
     sfx.setMuted(this.settings.muted);
+    this.emit();
+  }
+
+  /** Reading a panel suspends the simulation without losing the player's pause state. */
+  setOverlayOpen(open: boolean) {
+    if (open === this.overlayOpen) return;
+    this.overlayOpen = open;
+    this.hold = null;
+    if (open) {
+      this.resumeAfterOverlay = this.state === "running";
+      if (this.resumeAfterOverlay) this.togglePause();
+    } else {
+      if (this.resumeAfterOverlay && this.state === "paused" && !this.pendingConcept) this.togglePause();
+      this.resumeAfterOverlay = false;
+    }
   }
 
   togglePause() {
+    // A concept card owns the paused state until it is dismissed.
+    if (this.pendingConcept) return;
+    this.hold = null;
     if (this.state === "running") {
       this.setState("paused");
       sfx.deny();
@@ -266,7 +336,7 @@ export class Engine {
     this.pushLog(reason, "bad");
     this.shake = 26;
     this.flash = 1;
-    this.flashColor = "#ff3b47";
+    this.flashColor = "#d9544f";
     sfx.over();
     this.buzz([50, 70, 160]);
     for (let i = 0; i < 90; i++) {
@@ -274,7 +344,7 @@ export class Engine {
       if (c.unit) {
         const x = this.cx(this.grid.indexOf(c));
         const y = this.cy(this.grid.indexOf(c));
-        this.burst(x, y, "#ff6a3d", 5, 220);
+        this.burst(x, y, "#cf784d", 5, 220);
       }
     }
     this.setState("over");
@@ -322,11 +392,12 @@ export class Engine {
   /* ------------------------------------------------------------------ */
 
   private onKey(e: KeyboardEvent) {
-    const el = e.target as HTMLElement | null;
-    if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+    // Browser controls and dialogs own their native keyboard behavior.
+    if (e.target !== this.canvas || this.overlayOpen || this.pendingConcept || e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
-    if (["arrowup", "arrowdown", "arrowleft", "arrowright", " ", "tab"].includes(k))
+    if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k))
       e.preventDefault();
+    if (e.repeat && ["p", "escape", "r", "enter", " ", "x"].includes(k)) return;
 
     if (k === "p" || k === "escape") {
       if (this.state === "running" || this.state === "paused") this.togglePause();
@@ -361,7 +432,7 @@ export class Engine {
       this.select(Number(k) - 1);
       return;
     }
-    if (k === "q" || k === "e" || k === "tab") {
+    if (k === "q" || k === "e") {
       this.select((this.selected + 1) % 3);
       return;
     }
@@ -377,13 +448,16 @@ export class Engine {
 
   private onPointerMove(e: PointerEvent) {
     const i = this.cellFromEvent(e);
+    if (this.hold && this.hold.i !== i) this.hold = null;
     if (i < 0) return;
     this.cursor.x = i % COLS;
     this.cursor.y = (i / COLS) | 0;
   }
 
   private onPointerDown(e: PointerEvent) {
+    if (this.overlayOpen || e.button !== 0 || !e.isPrimary) return;
     e.preventDefault();
+    this.canvas.focus();
     sfx.unlock();
     const i = this.cellFromEvent(e);
     if (i < 0) return;
@@ -498,7 +572,7 @@ export class Engine {
     this.shake = Math.max(this.shake, 3);
     sfx.deny();
     const i = this.idx(this.cursor.x, this.cursor.y);
-    this.float(this.cx(i), this.cy(i) - this.cell * 0.35, "OCCUPIED", "#ff3b47", 12);
+    this.float(this.cx(i), this.cy(i) - this.cell * 0.35, "OCCUPIED", "#d9544f", 12);
   }
 
   scrap(i: number) {
@@ -525,9 +599,9 @@ export class Engine {
     cell.offline = 0;
     cell.pop = 1;
     this.score += 150;
-    this.burst(this.cx(i), this.cy(i), "#ffb020", 26, 190);
-    this.ring(this.cx(i), this.cy(i), "#ffb020");
-    this.float(this.cx(i), this.cy(i) - this.cell * 0.4, "+150 REBOOT", "#ffb020", 14);
+    this.burst(this.cx(i), this.cy(i), "#d6a243", 26, 190);
+    this.ring(this.cx(i), this.cy(i), "#d6a243");
+    this.float(this.cx(i), this.cy(i) - this.cell * 0.4, "+150 REBOOT", "#d6a243", 14);
     this.shake = Math.max(this.shake, 8);
     sfx.reboot();
     this.buzz(16);
@@ -611,7 +685,7 @@ export class Engine {
         const py = this.cy(c);
         hx += px;
         hy += py;
-        this.burst(px, py, "#4aa8ff", 8, 150);
+        this.burst(px, py, "#69a6d7", 8, 150);
         this.grid[c].pop = 1;
       }
       hx /= p.cells.length;
@@ -626,7 +700,7 @@ export class Engine {
       );
       this.shake = Math.max(this.shake, 7 + Math.min(9, p.cells.length));
       this.flash = Math.max(this.flash, 0.25);
-      this.flashColor = "#4aa8ff";
+      this.flashColor = "#69a6d7";
       sfx.link(p.cells.length);
       this.buzz([8, 26, 14]);
       if (fresh && p.cells.length >= 3)
@@ -661,11 +735,11 @@ export class Engine {
   }
 
   private evTrafficSpike() {
-    this.mod = { label: "TRAFFIC SPIKE  ×2 OUTPUT", color: "#4be08a", left: 12, total: 12, kind: "x2" };
+    this.mod = { label: "TRAFFIC SPIKE  ×2 OUTPUT", color: "#80b784", left: 12, total: 12, kind: "x2" };
     this.pushLog("TRAFFIC SPIKE / OUTPUT DOUBLED", "good");
     sfx.event(true);
     this.flash = 0.3;
-    this.flashColor = "#4be08a";
+    this.flashColor = "#80b784";
   }
   private evCoolantLeak() {
     const cx = Math.floor(Math.random() * COLS);
@@ -676,8 +750,8 @@ export class Engine {
     this.coreTemp = Math.min(99, this.coreTemp + 13);
     this.shake = Math.max(this.shake, 14);
     this.flash = 0.45;
-    this.flashColor = "#ff3b47";
-    this.burst(this.ox + (cx + 0.5) * this.cell, this.oy + (cy + 0.5) * this.cell, "#ff6a3d", 40, 260);
+    this.flashColor = "#d9544f";
+    this.burst(this.ox + (cx + 0.5) * this.cell, this.oy + (cy + 0.5) * this.cell, "#cf784d", 40, 260);
     this.pushLog("COOLANT LEAK / LOCAL HOTSPOT", "bad");
     sfx.event(false);
   }
@@ -693,17 +767,17 @@ export class Engine {
     sfx.event(false);
     this.shake = Math.max(this.shake, 10);
     this.flash = 0.35;
-    this.flashColor = "#ffb020";
-    this.burst(this.cx(target), this.cy(target), "#ffb020", 30, 200);
+    this.flashColor = "#d6a243";
+    this.burst(this.cx(target), this.cy(target), "#d6a243", 30, 200);
   }
   private evFirmware() {
-    this.mod = { label: "FIRMWARE PATCH  +35% I/O", color: "#2ee6d6", left: 10, total: 10, kind: "io" };
+    this.mod = { label: "FIRMWARE PATCH  +35% I/O", color: "#78c8c0", left: 10, total: 10, kind: "io" };
     this.pushLog("FIRMWARE PATCH / I/O +35%", "good");
     sfx.event(true);
   }
   private evIntakeClog() {
     this.ambient = Math.min(34, this.ambient + 2);
-    this.pushLog("INTAKE FILTERS CLOGGED / AMBIENT +2°", "warn");
+    this.pushLog("INTAKE FILTERS CLOGGED / AMBIENT STRESS +2", "warn");
     sfx.event(false);
     this.shake = Math.max(this.shake, 8);
   }
@@ -714,11 +788,11 @@ export class Engine {
     sfx.event(false);
     this.shake = Math.max(this.shake, 9);
     this.flash = 0.3;
-    this.flashColor = "#ff5fa2";
+    this.flashColor = "#c77a9c";
     this.burst(
       this.ox + (this.cursor.x + 0.5) * this.cell,
       this.oy + (this.cursor.y + 0.5) * this.cell,
-      "#ff5fa2",
+      "#c77a9c",
       22,
       160,
     );
@@ -732,18 +806,22 @@ export class Engine {
     this.flashColor = "#7d93ad";
   }
   private evBonus() {
+    if (this.podCount === 0 || this.throughput <= 0) {
+      this.pushLog("CLIENT OFFER / A PRODUCTIVE POD IS REQUIRED FOR A BONUS", "info");
+      return;
+    }
     this.score += 400;
     this.float(
       this.ox + this.board / 2,
       this.oy + this.board / 2,
       "+400 CLIENT WIND",
-      "#4be08a",
+      "#80b784",
       18,
     );
     this.pushLog("CLIENT WIND / +400 BONUS", "good");
     sfx.event(true);
     this.flash = 0.3;
-    this.flashColor = "#4be08a";
+    this.flashColor = "#80b784";
   }
 
   pushLog(text: string, kind: LogLine["kind"]) {
@@ -765,6 +843,69 @@ export class Engine {
     window.setTimeout(() => {
       if (this.newAchievement === id) this.newAchievement = null;
     }, 2400);
+  }
+
+  /**
+   * Surface a concept the first time the player's own floor demonstrates it.
+   * In learn mode this halts the sim so the card is actually read; otherwise
+   * it is logged silently and remains available in the codex.
+   */
+  teach(id: ConceptId) {
+    // Other trigger checks in this tick must not replace the visible lesson.
+    // They remain eligible for the next tick after this card is dismissed.
+    if (this.pendingConcept) return;
+    if (this.firedThisRun.has(id)) return;
+    this.firedThisRun.add(id);
+    const alreadyKnown = this.seenConcepts.has(id);
+    this.seenConcepts.add(id);
+    if (!alreadyKnown) this.onConceptUnlock?.(Array.from(this.seenConcepts));
+    if (alreadyKnown || !this.settings.learnMode) {
+      if (!alreadyKnown) this.pushLog(`CODEX UNLOCKED / ${id.toUpperCase()}`, "info");
+      return;
+    }
+    this.pendingConcept = id;
+    this.state = "paused";
+    this.onState?.("paused");
+    this.emit();
+  }
+
+  dismissConcept() {
+    if (!this.pendingConcept) return;
+    this.pendingConcept = null;
+    this.last = performance.now();
+    this.state = "running";
+    this.onState?.("running");
+    this.emit();
+  }
+
+  /** Evaluates every trigger condition once per simulation tick. */
+  private evaluateTriggers() {
+    if (this.pendingConcept) return;
+
+    const has = (u: UnitType) => this.grid.some((c) => c.unit === u);
+    const count = (u: UnitType) => this.grid.filter((c) => c.unit === u).length;
+
+    if (this.itLoad > 0 && this.time > 4) this.teach("pue");
+    if (this.scoredPods >= 1) this.teach("hot_cold_aisle");
+    if (has("cool")) this.teach("ashrae");
+    if (count("cool") >= 2) this.teach("delta_t");
+    if (has("power")) this.teach("power_chain");
+    if (has("fiber")) this.teach("tor_leaf_spine");
+    if (count("fiber") >= 2) this.teach("oversubscription");
+    if (this.rackCount >= 6) this.teach("rack_density");
+    if (this.load > 1) this.teach("stranded_capacity");
+    if (this.grid.some((c) => c.unit === "rack" && c.throttle > 0.4))
+      this.teach("thermal_throttle");
+    if (this.grid.some((c) => c.offline > 0)) {
+      this.teach("redundancy");
+      this.teach("tiers");
+    }
+    if (this.scrappes >= 1 && this.time > 8) this.teach("concurrent_maint");
+    if (this.phase >= 2) this.teach("capacity_planning");
+    if (this.phase >= 3) this.teach("free_cooling");
+    if (this.phase >= 4) this.teach("wue");
+    if (this.pods.some((p) => p.cells.length >= 6)) this.teach("liquid_cooling");
+    if (isFinite(this.pue) && this.pue > 1.9 && this.time > 20) this.teach("overcooling");
   }
 
   private computeTutorialStep(): number {
@@ -868,7 +1009,7 @@ export class Engine {
 
   private update(dt: number) {
     this.t += dt;
-    if (this.hold) {
+    if (this.hold && this.state === "running" && !this.overlayOpen) {
       this.hold.t += dt;
       if (this.hold.t > 0.42) {
         const i = this.hold.i;
@@ -888,6 +1029,7 @@ export class Engine {
   }
 
   private simulate(dt: number) {
+    const productive = this.podCount > 0 && this.throughput > 0;
     this.time += dt;
     this.phaseTimer -= dt;
     this.eventTimer -= dt;
@@ -907,7 +1049,7 @@ export class Engine {
 
     // achievement: hit 99 and live
     if (this.coreTemp > 99) this.peakTemp = Math.max(this.peakTemp, this.coreTemp);
-    if (this.coreTemp < 90 && this.peakTemp > 98) this.unlock("core_99");
+    if (productive && this.coreTemp < 90 && this.peakTemp > 98) this.unlock("core_99");
 
     // tutorial: progress once milestones are met
     this.tutorialStep = this.computeTutorialStep();
@@ -917,7 +1059,7 @@ export class Engine {
       this.phase++;
       this.phaseTimer = PHASE_TIME;
       this.ambient = Math.min(34, this.ambient + 2);
-      if (this.phase >= 3 && this.scrappes === 0) this.unlock("no_scrape_3");
+      if (productive && this.phase >= 3 && this.scrappes === 0) this.unlock("no_scrape_3");
       const shiftIndex = Math.min(SHIFTS.length - 1, Math.floor((this.phase - 1) / 1.5));
       if (SHIFTS[shiftIndex].name !== this.shiftName) {
         this.shift = shiftIndex;
@@ -927,16 +1069,16 @@ export class Engine {
         this.flashColor = SHIFTS[shiftIndex].tint;
         this.shake = Math.max(this.shake, 12);
       }
-      this.score += 200 * this.phase;
+      const phaseBonus = productive ? 200 * this.phase : 0;
+      this.score += phaseBonus;
       this.pushLog(
-        `PHASE ${this.phase} / AMBIENT ${this.ambient.toFixed(0)}° / UPTIME +${200 * this.phase}`,
+        `PHASE ${this.phase} / AMBIENT STRESS ${this.ambient.toFixed(0)} / ${phaseBonus ? `UPTIME +${phaseBonus}` : "NO PRODUCTIVE POD / NO BONUS"}`,
         "warn",
       );
       this.shake = Math.max(this.shake, 10);
       this.flash = Math.max(this.flash, 0.25);
-      this.flashColor = this.flashColor === "#ffb020" ? "#ffb020" : this.flashColor;
       sfx.phase();
-      if (this.phase >= 4) this.unlock("phases_3");
+      if (productive && this.phase >= 4) this.unlock("phases_3");
     }
     if (this.eventTimer <= 0) {
       this.eventTimer = EVENT_TIME;
@@ -959,6 +1101,25 @@ export class Engine {
     this.capacity = capacity;
     this.demand = demand;
     this.load = demand / Math.max(1, capacity);
+
+    // --- PUE: total facility draw over IT draw.
+    let itDraw = 0;
+    for (const c of this.grid) {
+      if (c.unit && IT_UNITS.includes(c.unit)) itDraw += UNITS[c.unit].draw;
+    }
+    this.itLoad = itDraw;
+    this.overhead = Math.max(0, demand - itDraw);
+    this.pue = itDraw > 0 ? demand / itDraw : Infinity;
+    if (itDraw > 0 && isFinite(this.pue)) {
+      this.pueSum += this.pue;
+      this.pueSamples++;
+    }
+
+    // A spare PDU beyond what the load needs approximates N+1.
+    const pdus = this.grid.filter((c) => c.unit === "power");
+    const onlinePdus = pdus.filter((c) => c.offline <= 0).length;
+    this.redundantPower =
+      onlinePdus >= 2 && capacity - (UNITS.power.capacity as number) >= demand;
 
     // ---- per cell heat / age
     for (let i = 0; i < CELLS; i++) {
@@ -992,7 +1153,18 @@ export class Engine {
       if (c.unit && c.throttle > 0.55 && Math.random() < dt * 4)
         this.smoke(this.cx(i), this.cy(i), "rgba(255,120,60,0.5)");
       if (c.unit) heatGen += Math.max(0, gen);
-      if (c.unit === "cool" && c.offline <= 0) coolCap += (UNITS.cool.vent as number) * brownout;
+      // A coolant array only earns its full capacity if it is actually serving
+      // racks. Conditioning empty floor is bypass air: power spent for no work.
+      if (c.unit === "cool" && c.offline <= 0) {
+        let served = 0;
+        for (let oy = -1; oy <= 1; oy++)
+          for (let ox = -1; ox <= 1; ox++) {
+            if (!this.inBounds(x + ox, y + oy)) continue;
+            if (this.grid[this.idx(x + ox, y + oy)].unit === "rack") served++;
+          }
+        const utilisation = 0.4 + 0.6 * Math.min(1, served / 6);
+        coolCap += (UNITS.cool.vent as number) * utilisation * brownout;
+      }
     }
 
     // ---- core temperature
@@ -1002,6 +1174,7 @@ export class Engine {
 
     // ---- throughput
     let out = 0;
+    let anyPodThrottled = false;
     for (const p of this.pods) {
       const n = p.cells.length;
       let base = Math.pow(n, 1.3) * 1.2 * (n >= 3 ? 1.15 : 0.55);
@@ -1010,12 +1183,18 @@ export class Engine {
       for (const c of p.cells) h += this.grid[c].heat;
       h /= n;
       const thr = h > 70 ? Math.max(0.15, 1 - (h - 70) / 45) : 1;
+      if (thr < 1) anyPodThrottled = true;
       out += base * thr;
     }
+    // Count elapsed affected time once per tick, regardless of the number of racks.
+    if (anyPodThrottled) this.throttledSeconds += dt;
     const modMult = this.mod ? (this.mod.kind === "x2" ? 2 : 1.35) : 1;
     const thruCombo = Math.min(2, 1 + this.combo * 0.12);
     this.throughput = out * modMult * thruCombo * brownout;
     this.score += this.throughput * dt * 10;
+
+    this.peakTemp = Math.max(this.peakTemp, this.coreTemp);
+    this.evaluateTriggers();
 
     // ---- alarm
     if (this.coreTemp > 82) {
@@ -1144,7 +1323,28 @@ export class Engine {
       newAchievement: this.newAchievement,
       achievements: Array.from(this.achievements),
       scoredPods: this.scoredPods,
+      objectives: this.buildObjectives(),
+      pue: this.pue,
+      avgPue: this.pueSamples > 0 ? this.pueSum / this.pueSamples : Infinity,
+      itLoad: this.itLoad,
+      overhead: this.overhead,
+      peakTemp: this.peakTemp,
+      throttled: this.throttledSeconds,
+      redundantPower: this.redundantPower,
+      pendingConcept: this.pendingConcept,
+      seenConcepts: Array.from(this.seenConcepts),
+      learnMode: this.settings.learnMode,
     });
+  }
+
+  /** Onboarding checklist. Rendered as the board's bottom status band. */
+  private buildObjectives(): Objective[] {
+    return [
+      { label: "Link a POD", done: this.scoredPods >= 1 },
+      { label: "Deploy coolant", done: this.grid.some((c) => c.unit === "cool") },
+      { label: "Deploy a PDU", done: this.grid.some((c) => c.unit === "power") },
+      { label: "Reach 3 PODs", done: this.podCount >= 3 },
+    ];
   }
 }
 
